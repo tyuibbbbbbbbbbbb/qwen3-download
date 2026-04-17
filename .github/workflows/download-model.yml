@@ -1,0 +1,35 @@
+name: Download Qwen3-8B GGUF
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download model from HuggingFace
+        run: |
+          wget -q --show-progress -O Qwen3-8B-Q4_K_M.gguf \
+            "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf?download=true"
+          ls -lh Qwen3-8B-Q4_K_M.gguf
+
+      - name: Split into 1.9GB parts
+        run: |
+          split -b 1900M Qwen3-8B-Q4_K_M.gguf qwen3-8b-part-
+          ls -lh qwen3-8b-part-*
+          # Create checksum
+          sha256sum Qwen3-8B-Q4_K_M.gguf > sha256sum.txt
+          cat sha256sum.txt
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v1.0-qwen3-8b"
+          gh release create "$TAG" \
+            --title "Qwen3-8B Q4_K_M GGUF" \
+            --notes "Qwen3-8B-Q4_K_M.gguf (~5GB) split into parts. Download all parts and merge with: copy /b qwen3-8b-part-* Qwen3-8B-Q4_K_M.gguf" \
+            --repo "${{ github.repository }}" \
+            qwen3-8b-part-* sha256sum.txt
