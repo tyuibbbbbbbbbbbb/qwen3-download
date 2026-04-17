@@ -1,0 +1,42 @@
+name: Download LM Studio
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/download-lmstudio.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download LM Studio Windows installer
+        run: |
+          # Get the latest Windows installer URL
+          wget -q --show-progress -O "LM-Studio-Setup.exe" \
+            "https://releases.lmstudio.ai/windows/x86/0.4.11/LM-Studio-0.4.11-Setup.exe" || \
+          wget -q --show-progress -O "LM-Studio-Setup.exe" \
+            "https://installers.lmstudio.ai/windows/x64/LM-Studio-Setup-0.4.11.exe" || \
+          wget -q --show-progress -O "LM-Studio-Setup.exe" \
+            "https://releases.lmstudio.ai/windows/0.4.11/LM-Studio-0.4.11+1-Setup.exe"
+          ls -lh LM-Studio-Setup.exe
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v1.0-lmstudio"
+          gh release delete "$TAG" --repo "${{ github.repository }}" -y 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "LM Studio Windows Installer" \
+            --notes "LM Studio installer for Windows" \
+            --repo "${{ github.repository }}" \
+            LM-Studio-Setup.exe
