@@ -18,37 +18,126 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download LM Studio Windows installer
+      - name: Find and download LM Studio
         run: |
-          # Get the install script to find the real URL
-          echo "=== Fetching install script ==="
-          curl -sL "https://lmstudio.ai/install.ps1" -o install.ps1
-          cat install.ps1 | head -50
-          
-          # Extract download URL from the script
-          URL=$(grep -oP 'https://[^"'\'']+\.exe[^"'\'']*' install.ps1 | head -1) || true
-          echo "Found URL: $URL"
-          
-          if [ -n "$URL" ]; then
-            wget -q --show-progress -O "LM-Studio-Setup.exe" "$URL"
-          else
-            # Try common URL patterns
-            echo "Trying common patterns..."
-            curl -sL "https://lmstudio.ai/download" -o dl_page.html
-            URL2=$(grep -oP 'https://[^"]+\.exe[^"]*' dl_page.html | head -1) || true
-            echo "Page URL: $URL2"
-            if [ -n "$URL2" ]; then
-              wget -q --show-progress -O "LM-Studio-Setup.exe" "$URL2"
-            else
-              # Direct attempt with common patterns
-              wget -q --show-progress -O "LM-Studio-Setup.exe" \
-                "https://releases.lmstudio.ai/windows/x64/0.4.11+1/LM-Studio-0.4.11+1-Setup.exe" || \
-              wget -q --show-progress -O "LM-Studio-Setup.exe" \
-                "https://cdn.lmstudio.ai/LM-Studio-0.4.11-Setup.exe" || \
-              curl -L -o "LM-Studio-Setup.exe" "https://lmstudio.ai/download/windows"
-            fi
-          fi
-          ls -lh LM-Studio-Setup.exe
+          pip install requests
+
+          python3 << 'PYEOF'
+          import requests, re, json, subprocess, os
+
+          session = requests.Session()
+          session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"})
+
+          urls_to_try = []
+
+          # Method 1: Check lmstudio.ai for download links
+          print("=== Checking lmstudio.ai ===")
+          try:
+              r = session.get("https://lmstudio.ai/download", timeout=15)
+              print(f"Download page: {r.status_code}, {len(r.text)} bytes")
+              # Look for exe URLs
+              exe_urls = re.findall(r'https?://[^"\'>\s]+\.exe[^"\'>\s]*', r.text)
+              if exe_urls:
+                  print(f"Found exe URLs: {exe_urls}")
+                  urls_to_try.extend(exe_urls)
+              # Look for any download URLs
+              dl_urls = re.findall(r'https?://[^"\'>\s]*(?:download|release|install)[^"\'>\s]*', r.text)
+              print(f"Download-related URLs: {dl_urls[:10]}")
+          except Exception as e:
+              print(f"Error: {e}")
+
+          # Method 2: Check GitHub lmstudio-ai org for releases
+          print("\n=== Checking GitHub releases ===")
+          for repo in ["lmstudio-ai/lms", "lmstudio-ai/lmstudio-bug-tracker", "lmstudio-ai/configs"]:
+              try:
+                  r = session.get(f"https://api.github.com/repos/{repo}/releases/latest", timeout=10)
+                  if r.status_code == 200:
+                      data = r.json()
+                      for asset in data.get("assets", []):
+                          name = asset.get("name", "")
+                          if "windows" in name.lower() or name.endswith(".exe"):
+                              print(f"GitHub asset: {name} -> {asset['browser_download_url']}")
+                              urls_to_try.append(asset["browser_download_url"])
+              except:
+                  pass
+
+          # Method 3: Try uptodown mirror
+          print("\n=== Checking uptodown ===")
+          try:
+              r = session.get("https://lm-studio.en.uptodown.com/windows/download", timeout=15)
+              dl_links = re.findall(r'https?://[^"\'>\s]*(?:dw|download)[^"\'>\s]*\.exe[^"\'>\s]*', r.text)
+              if dl_links:
+                  print(f"Uptodown links: {dl_links}")
+                  urls_to_try.extend(dl_links)
+              # Look for the actual download button URL
+              data_urls = re.findall(r'data-url="([^"]+)"', r.text)
+              if data_urls:
+                  print(f"Data URLs: {data_urls}")
+                  urls_to_try.extend(data_urls)
+          except Exception as e:
+              print(f"Uptodown error: {e}")
+
+          # Method 4: Known CDN patterns
+          print("\n=== Trying known CDN patterns ===")
+          known_patterns = [
+              "https://releases.lmstudio.ai/windows/x64/0.4.11+1/LM-Studio-0.4.11+1-Setup.exe",
+              "https://releases.lmstudio.ai/windows/0.4.11+1/LM-Studio-0.4.11+1-Setup.exe",
+              "https://releases.lmstudio.ai/win32/x64/LM-Studio-0.4.11+1-Setup.exe",
+              "https://releases.lmstudio.ai/latest/LM-Studio-Setup.exe",
+          ]
+          for url in known_patterns:
+              try:
+                  r = session.head(url, allow_redirects=True, timeout=10)
+                  size = int(r.headers.get("content-length", 0))
+                  print(f"{url} -> {r.status_code} ({size} bytes)")
+                  if r.status_code == 200 and size > 1000000:
+                      urls_to_try.insert(0, url)
+              except Exception as e:
+                  print(f"{url} -> {e}")
+
+          # Method 5: Check llmster CLI download (might have GUI installer link)
+          print("\n=== Checking llmster ===")
+          try:
+              r = session.get("https://llmster.lmstudio.ai/download", timeout=15, allow_redirects=True)
+              print(f"llmster: {r.status_code} {r.url} ({len(r.content)} bytes)")
+              ct = r.headers.get("content-type", "")
+              if "application" in ct and len(r.content) > 1000000:
+                  with open("LM-Studio-Setup.exe", "wb") as f:
+                      f.write(r.content)
+                  print("Downloaded from llmster!")
+          except Exception as e:
+              print(f"llmster: {e}")
+
+          # Try downloading the first valid URL
+          print(f"\n=== URLs to try: {len(urls_to_try)} ===")
+          for url in urls_to_try:
+              print(f"Trying: {url}")
+              try:
+                  r = session.get(url, stream=True, timeout=30)
+                  size = int(r.headers.get("content-length", 0))
+                  if size > 1000000:  # > 1MB means real file
+                      print(f"Downloading {size} bytes...")
+                      with open("LM-Studio-Setup.exe", "wb") as f:
+                          for chunk in r.iter_content(8192):
+                              f.write(chunk)
+                      final_size = os.path.getsize("LM-Studio-Setup.exe")
+                      print(f"Downloaded: {final_size} bytes")
+                      if final_size > 1000000:
+                          break
+                  else:
+                      print(f"Too small: {size}")
+              except Exception as e:
+                  print(f"Failed: {e}")
+
+          if os.path.exists("LM-Studio-Setup.exe"):
+              size = os.path.getsize("LM-Studio-Setup.exe")
+              print(f"\nFinal file: {size} bytes")
+              if size < 1000000:
+                  print("WARNING: File too small, probably not the real installer")
+                  os.remove("LM-Studio-Setup.exe")
+          PYEOF
+
+          ls -lh LM-Studio-Setup.exe 2>/dev/null || echo "No installer downloaded"
 
       - name: Create Release
         env:
