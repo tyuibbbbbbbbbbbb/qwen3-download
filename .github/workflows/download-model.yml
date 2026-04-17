@@ -4,12 +4,17 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: write
+
 jobs:
   download:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download model from HuggingFace
         run: |
           wget -q --show-progress -O Qwen3-8B-Q4_K_M.gguf \
