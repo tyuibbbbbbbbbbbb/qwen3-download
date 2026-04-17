@@ -20,13 +20,34 @@ jobs:
 
       - name: Download LM Studio Windows installer
         run: |
-          # Get the latest Windows installer URL
-          wget -q --show-progress -O "LM-Studio-Setup.exe" \
-            "https://releases.lmstudio.ai/windows/x86/0.4.11/LM-Studio-0.4.11-Setup.exe" || \
-          wget -q --show-progress -O "LM-Studio-Setup.exe" \
-            "https://installers.lmstudio.ai/windows/x64/LM-Studio-Setup-0.4.11.exe" || \
-          wget -q --show-progress -O "LM-Studio-Setup.exe" \
-            "https://releases.lmstudio.ai/windows/0.4.11/LM-Studio-0.4.11+1-Setup.exe"
+          # Get the install script to find the real URL
+          echo "=== Fetching install script ==="
+          curl -sL "https://lmstudio.ai/install.ps1" -o install.ps1
+          cat install.ps1 | head -50
+          
+          # Extract download URL from the script
+          URL=$(grep -oP 'https://[^"'\'']+\.exe[^"'\'']*' install.ps1 | head -1) || true
+          echo "Found URL: $URL"
+          
+          if [ -n "$URL" ]; then
+            wget -q --show-progress -O "LM-Studio-Setup.exe" "$URL"
+          else
+            # Try common URL patterns
+            echo "Trying common patterns..."
+            curl -sL "https://lmstudio.ai/download" -o dl_page.html
+            URL2=$(grep -oP 'https://[^"]+\.exe[^"]*' dl_page.html | head -1) || true
+            echo "Page URL: $URL2"
+            if [ -n "$URL2" ]; then
+              wget -q --show-progress -O "LM-Studio-Setup.exe" "$URL2"
+            else
+              # Direct attempt with common patterns
+              wget -q --show-progress -O "LM-Studio-Setup.exe" \
+                "https://releases.lmstudio.ai/windows/x64/0.4.11+1/LM-Studio-0.4.11+1-Setup.exe" || \
+              wget -q --show-progress -O "LM-Studio-Setup.exe" \
+                "https://cdn.lmstudio.ai/LM-Studio-0.4.11-Setup.exe" || \
+              curl -L -o "LM-Studio-Setup.exe" "https://lmstudio.ai/download/windows"
+            fi
+          fi
           ls -lh LM-Studio-Setup.exe
 
       - name: Create Release
